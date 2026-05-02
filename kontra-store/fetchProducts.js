@@ -180,13 +180,7 @@ async function syncToMedusa() {
     // Fetch the 10 specific serial numbers you requested
     const cursor = productsCol.find({
       NumriSerik: {
-        $in: [
-          "10345235",
-          "15368370",
-          "15340976",
-          "12291815",
-          "22037424",
-        ],
+        $in: ["10345235", "15368370", "15340976", "12291815", "22037424"],
       },
     });
 
@@ -200,7 +194,7 @@ async function syncToMedusa() {
     for (const serialNum of Object.keys(grouped)) {
       const group = grouped[serialNum];
 
-      console.log(`\n📦 Processing Style: ${serialNum}`);
+      console.log(`Processing Style: ${serialNum}`);
 
       // Step A: Filter out non-existent images
       const validatedImages = await getValidImages(
@@ -210,51 +204,28 @@ async function syncToMedusa() {
       const medusaProduct = buildMedusaProduct(group, validatedImages);
 
       // Step B: Build Variants with Price Logic
-      for (const item of group) {
-        const stockData = await fetchStockAndPrice(item.ArtikulliId);
+for (const item of group) {
+  const stockData = await fetchStockAndPrice(item.ArtikulliId);
 
-        // SANITY CHECK:
-        // If the API returns 39.99, regPrice becomes 3999.
-        // If the API returns 3999 (already cents), regPrice becomes 399900 (WRONG).
-        let rawPrice = stockData?.CmimiShitjes || 0;
-        let rawSale = stockData?.CmimiMeZbritje || 0;
+  // 1. Get raw values from API (e.g., 69.99)
+  const rawPrice = stockData?.CmimiShitjes || 0;
+  const rawSale = stockData?.CmimiMeZbritje || 0;
 
-        // If the price from your API is already > 1000 and has no decimals,
-        // it might already be in cents. Adjust accordingly.
-        const regPrice = Math.round(rawPrice * 100);
-        const salePrice = Math.round(rawSale * 100);
+  // 2. Determine which one to use
+  // Use sale price if it exists and is lower, otherwise use regular
+  const activePrice = (rawSale > 0 && rawSale < rawPrice) ? rawSale : rawPrice;
 
-        const finalAmount =
-          salePrice > 0 && salePrice < regPrice ? salePrice : regPrice;
-
-        console.log(
-          `💰 Price Check for ${item.ArtikulliId}: Raw(${rawPrice}) -> Medusa(${finalAmount})`,
-        );
-        }
-      for (const item of group) {
-        const stockData = await fetchStockAndPrice(item.ArtikulliId);
-
-        // Price logic: Medusa needs integers (cents)
-        const regPrice = Math.round((stockData?.CmimiShitjes || 0) * 100);
-        const salePrice = Math.round((stockData?.CmimiMeZbritje || 0) * 100);
-
-        // If prices match, we only send one. If they differ, the lower one is the active price.
-        // In a basic Medusa setup, the first price in the array is the default.
-        const finalAmount =
-          salePrice > 0 && salePrice < regPrice ? salePrice : regPrice;
-
-        medusaProduct.variants.push({
-          title: `${item.Size} / ${item.Ngjyra}`,
-          sku: item.ArtikulliId.toString(),
-          options: { Color: item.Ngjyra, Size: item.Size },
-          prices: [{ currency_code: "eur", amount: finalAmount }],
-          metadata: {
-            on_sale: salePrice < regPrice && salePrice > 0,
-            original_price: regPrice / 100,
-          },
-        });
-      }
-
+  medusaProduct.variants.push({
+    title: `${item.Size} / ${item.Ngjyra}`,
+    sku: item.ArtikulliId.toString(),
+    options: { Color: item.Ngjyra, Size: item.Size },
+    prices: [{ currency_code: "eur", amount: rawPrice }],
+    metadata: {
+      original_price: rawPrice,
+      is_on_sale: rawSale < rawPrice && rawSale > 0
+    }
+  });
+}
       // Step C: Push to Medusa
       try {
         const createdProduct = await createProduct(medusaProduct);
@@ -271,12 +242,12 @@ async function syncToMedusa() {
           }
         }
       } catch (err) {
-        console.error(`❌ Failed ${serialNum}:`, err.message);
+        console.error(`Failed ${serialNum}:`, err.message);
       }
     }
   } finally {
     await client.close();
-    console.log("\n🏁 Sync complete.");
+    console.log("Sync complete.");
   }
 }
 
